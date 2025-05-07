@@ -1,0 +1,74 @@
+
+import os
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+from pathlib import Path
+from onekey_algo.custom.components.Radiology import diagnose_3d_image_mask_settings, get_image_mask_from_dir
+from onekey_algo import OnekeyDS as okds
+
+os.makedirs('img', exist_ok=True)
+# 设置数据目录
+mydir = r'C:\Users\123\Desktop\san'
+#mydir = okds.ct
+
+# 生成images和masks对，一对一的关系。也可以自定义替换。
+images, masks = get_image_mask_from_dir(mydir, images='CT', masks='MASK0-20')
+
+# 自定义获取images和masks数据的方法，下面的例子为，每个样本一个文件夹，图像是以im.nii结尾，mask是以seg.nii结尾。
+# def get_images_mask(mydir):
+#     images = []
+#     masks = []
+#     for root, dirs, files in os.walk(mydir):
+#         for f in files:
+#             if f.endswith('im.nii'):
+#                 images.append(os.path.join(root, f))
+#             if f.endswith('seg.nii'):
+#                 masks.append(os.path.join(root, f))
+#     return images, masks
+# images, masks = get_images_mask(mydir)
+
+diagnose_3d_image_mask_settings(images, masks)
+print(f'获取到{len(images)}个样本。')
+
+
+import warnings
+import pandas as pd
+import os
+warnings.filterwarnings("ignore")
+
+from onekey_algo.custom.components.Radiology import ConventionalRadiomics
+if os.path.exists('results/rad_features.csv'):
+    rad_data = pd.read_csv('results/rad_features.csv', header=0)
+else:
+    # 如果要自定义一些特征提取方式，可以使用param_file。
+    param_file = r'./custom_settings/exampleCT.yaml'
+    #param_file = None
+    radiomics = ConventionalRadiomics(param_file, correctMask= True)
+    #radiomics.extract(images, masks)#瘤内
+    radiomics.extract(images, masks, labels=[4])#瘤周
+    rad_data = radiomics.get_label_data_frame(label=4)
+rad_data.head()
+rad_data.to_csv('rad_features_san_15-20.csv', header=True, index=False)
+
+
+###feature selection###
+rad_data.columns
+rad_data.describe()
+from onekey_algo.custom.components.comp1 import normalize_df
+data = normalize_df(rad_data, not_norm=['ID'])
+data.describe()
+spearman_corr = data.corr('spearman')
+import seaborn as sns
+import matplotlib.pyplot as plt
+from onekey_algo.custom.components.comp1 import draw_matrix
+plt.figure(figsize=(10.0, 8.0))
+
+# 选择可视化的相关系数
+draw_matrix(spearman_corr, annot=True, cmap='YlGnBu', cbar=False)
+plt.savefig(f'img/feature_corr.svg', bbox_inches = 'tight')
+from onekey_algo.custom.components.comp1 import select_feature
+sel_feature = select_feature(spearman_corr, threshold=0.9, topn=10, verbose=False)
+sel_feature
+data[['ID'] + sel_feature].head()
+sel_data = data[['ID'] + sel_feature]
+sel_data.describe()
+sel_data.to_csv('rad_features_select.csv', header=True, index=False)

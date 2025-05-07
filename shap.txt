@@ -1,0 +1,288 @@
+import shap
+explainer = shap.TreeExplainer(rf)
+shap_values = explainer.shap_values(X_test)
+feature_importance = np.mean(np.abs(shap_values), axis=0)
+
+# 创建一个 DataFrame，将列名设置为 X_test 的特征名
+feature_importance_df = pd.DataFrame({
+    'Feature': X_test.columns,  # 使用 X_test 的特征名
+    'Importance': feature_importance  # 对应的均值
+}).sort_values(by='Importance', ascending=False)  # 按重要性降序排序
+feature_importance_df
+# 计算Importance的总和
+total_importance = feature_importance_df['Importance'].sum()
+
+# 添加新的一列 'Importance占比'
+feature_importance_df['Importance_Percentage'] = ((feature_importance_df['Importance'] / total_importance)*100).round(2)
+feature_importance_df
+importance_list = [round(value, 2) for value in feature_importance_df['Importance_Percentage'].tolist()]
+importance_list
+percentages = importance_list
+colors = ['#D32F2F', '#F44336', '#FF5722', '#FF7043', '#FF9800', '#FFC107', '#FFEB3B', '#8BC34A', '#4CAF50', '#009688', '#00BCD4', '#2196F3', '#3F51B5', '#9C27B0', '#673AB7']
+light_gray = '#E8E8E8'  # 浅灰色
+off_white = '#FFFAFA'    # 接近白色的颜色
+
+# 计算每个扇区的角度
+angles = np.linspace(0, 2 * np.pi, len(percentages), endpoint=False).tolist()
+
+# 定义旋转角度（以弧度为单位）
+rotation_angle = np.pi / 2  # 旋转 45 度，您可以调整这个值
+
+# 旋转角度
+angles = [(angle + rotation_angle) % (2 * np.pi) for angle in angles]
+
+# 底部颜色（使用更浅的颜色）
+bottom_colors = [off_white, light_gray]  # 循环使用白色和浅灰色
+
+# 创建图形和极坐标轴
+fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(polar=True))
+
+# 调整柱状图的宽度，使其更紧密
+bar_width = 0.45  # 更小的宽度，减少柱状图之间的距离
+
+# 绘制底部部分（浅色部分）
+for i, (percentage, angle) in enumerate(zip(percentages, angles)):
+    bottom_color = bottom_colors[i % len(bottom_colors)]  # 按顺序选择底部颜色
+    ax.bar(angle, percentage * 3 / 4, width=bar_width, color=bottom_color, bottom=0)
+
+# 绘制顶部彩色部分（实际显示的柱状图部分）
+for i, (percentage, angle, color) in enumerate(zip(percentages, angles, colors)):
+    ax.bar(angle, percentage / 4, width=bar_width, color=color, bottom=percentage * 3 / 4)
+
+# 在顶部添加百分比标签
+for i, (bar, percentage) in enumerate(zip(ax.patches, percentages)):
+    angle = bar.get_x() + bar.get_width() / 2
+    height = bar.get_height() + 5.1  # 将文本放置在柱状图顶部之外
+    if i < len(percentages):
+        ax.text(angle, height, f'{percentage}%', horizontalalignment='center', verticalalignment='center', size=14, fontweight='bold')
+
+# 移除径向和角度的刻度和标签
+ax.set_yticklabels([])  # 移除径向标签
+ax.set_yticks([])       # 移除径向刻度线
+ax.set_xticks([])       # 移除角度刻度线
+
+# 去掉极坐标图的背景和圆圈
+ax.spines['polar'].set_visible(False)
+plt.savefig("123.pdf", format='pdf', bbox_inches='tight', dpi=1200)
+# 显示图形
+plt.show()
+import matplotlib.pyplot as plt
+import numpy as np
+
+cmap = shap.plots.colors.red_white_blue
+
+# 按照 'Importance' 进行降序排序
+feature_importance_df = feature_importance_df.sort_values(by='Importance', ascending=False)
+
+# 创建横向条形图
+plt.figure(figsize=(10, 6))
+
+# 归一化 'Importance' 值，用于颜色映射
+norm = plt.Normalize(vmin=feature_importance_df['Importance'].min(), vmax=feature_importance_df['Importance'].max())
+
+# 绘制横向条形图，使用颜色映射
+bars = plt.barh(feature_importance_df['Feature'], feature_importance_df['Importance'], color=cmap(norm(feature_importance_df['Importance'])))
+
+# 添加标签和标题
+plt.xlabel('Feature Importance', fontsize=14, fontweight='bold')
+# 创建颜色条，并确保其附加到当前坐标轴
+sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+sm.set_array([])
+
+# 创建颜色条
+cbar = plt.colorbar(sm, ax=plt.gca())
+cbar.set_label('Contribute', fontsize=14, fontweight='bold')
+
+
+# 去掉颜色条的黑色边框
+cbar.outline.set_visible(False)
+
+# 修改颜色条的标签
+cbar.set_ticks([norm.vmin, norm.vmax])
+cbar.set_ticklabels(['Low', 'High'], fontsize=12, fontweight='bold')
+
+# 反转Y轴，确保最大值在顶部
+plt.gca().invert_yaxis()
+
+# 隐藏右侧和顶部的轴
+plt.gca().spines['right'].set_visible(False)
+plt.gca().spines['top'].set_visible(False)
+# 增加x轴和y轴的标签字体大小和加粗
+plt.xticks(fontsize=12, fontweight='bold')
+plt.yticks(fontsize=12, fontweight='bold')
+# 显示图形
+plt.tight_layout()
+plt.savefig("111.pdf", format='pdf', bbox_inches='tight', dpi=1200)
+plt.show()
+percentages = importance_list 
+
+# 定义颜色映射（colormap）
+cmap = shap.plots.colors.red_white_blue
+
+# 将百分比归一化到0到1的范围，以便映射到颜色
+norm = plt.Normalize(vmin=min(percentages), vmax=max(percentages))
+
+# 根据归一化后的百分比获取颜色
+colors = [cmap(norm(percentage)) for percentage in percentages]
+
+# 其他参数设置
+light_gray = '#E8E8E8'  # 浅灰色
+off_white = '#FFFAFA'    # 接近白色的颜色
+
+# 计算每个扇区的角度
+angles = np.linspace(0, 2 * np.pi, len(percentages), endpoint=False).tolist()
+
+# 定义旋转角度（以弧度为单位）
+rotation_angle = np.pi / 2  # 旋转 45 度
+
+# 对角度进行旋转
+angles = [(angle + rotation_angle) % (2 * np.pi) for angle in angles]
+
+# 底部颜色（使用浅灰色和接近白色交替）
+bottom_colors = [off_white, light_gray]
+
+# 创建图形和极坐标轴
+fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+
+# 调整柱状图的宽度，使其更紧密
+bar_width = 0.45  # 更小的宽度，减少柱状图之间的距离
+
+# 绘制底部部分（浅色部分）
+for i, (percentage, angle) in enumerate(zip(percentages, angles)):
+    bottom_color = bottom_colors[i % len(bottom_colors)]  # 按顺序选择底部颜色
+    ax.bar(angle, percentage * 3 / 4, width=bar_width, color=bottom_color, bottom=0)
+
+# 绘制顶部彩色部分（实际显示的柱状图部分）
+for i, (percentage, angle, color) in enumerate(zip(percentages, angles, colors)):
+    ax.bar(angle, percentage / 4, width=bar_width, color=color, bottom=percentage * 3 / 4)
+
+# 在顶部添加百分比标签
+for i, (bar, percentage) in enumerate(zip(ax.patches, percentages)):
+    angle = bar.get_x() + bar.get_width() / 2
+    height = bar.get_height() + 5.1  # 将文本放置在柱状图顶部之外
+    ax.text(angle, height, f'{percentage}%', horizontalalignment='center', verticalalignment='center', size=12)
+
+# 移除径向和角度的刻度和标签
+ax.set_yticklabels([])  # 移除径向标签
+ax.set_yticks([])       # 移除径向刻度线
+ax.set_xticks([])       # 移除角度刻度线
+
+# 去掉极坐标图的背景和圆圈
+ax.spines['polar'].set_visible(False)
+plt.savefig("122223.pdf", format='pdf', bbox_inches='tight', dpi=1200)
+plt.show()
+# 颜色映射
+cmap = shap.plots.colors.red_white_blue
+
+# 按照 'Importance' 进行降序排序
+feature_importance_df = feature_importance_df.sort_values(by='Importance', ascending=False)
+
+# 创建横向条形图
+plt.figure(figsize=(10, 6))
+
+# 归一化 'Importance' 值，用于颜色映射
+norm = plt.Normalize(vmin=feature_importance_df['Importance'].min(), vmax=feature_importance_df['Importance'].max())
+
+# 绘制横向条形图，使用颜色映射
+bars = plt.barh(feature_importance_df['Feature'], feature_importance_df['Importance'], color=cmap(norm(feature_importance_df['Importance'])))
+
+# 添加标签和标题
+plt.xlabel('Feature Importance', fontsize=14, fontweight='bold')
+
+# 创建颜色条，并确保其附加到当前坐标轴
+sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+sm.set_array([])
+
+# 创建颜色条
+cbar = plt.colorbar(sm, ax=plt.gca())
+cbar.set_label('Contribute', fontsize=14, fontweight='bold')
+
+# 去掉颜色条的黑色边框
+cbar.outline.set_visible(False)
+
+# 修改颜色条的标签
+cbar.set_ticks([norm.vmin, norm.vmax])
+cbar.set_ticklabels(['Low', 'High'], fontsize=12, fontweight='bold')
+
+# 反转Y轴，确保最大值在顶部
+plt.gca().invert_yaxis()
+
+# 隐藏右侧和顶部的轴
+plt.gca().spines['right'].set_visible(False)
+plt.gca().spines['top'].set_visible(False)
+
+# 增加x轴和y轴的标签字体大小和加粗
+plt.xticks(fontsize=12, fontweight='bold')
+plt.yticks(fontsize=12, fontweight='bold')
+
+# ------------- Second Visualization: Polar Plot -------------
+percentages = importance_list  # 设定百分比数据，假设已定义importance_list
+
+# 定义颜色映射（colormap）
+norm2 = plt.Normalize(vmin=min(percentages), vmax=max(percentages))
+colors = [cmap(norm2(percentage)) for percentage in percentages]
+
+# 其他参数设置
+light_gray = '#E8E8E8'  # 浅灰色
+off_white = '#FFFAFA'    # 接近白色的颜色
+
+# 计算每个扇区的角度
+angles = np.linspace(0, 2 * np.pi, len(percentages), endpoint=False).tolist()
+
+# 定义旋转角度（以弧度为单位）
+rotation_angle = np.pi / 2  # 旋转 45 度
+
+# 对角度进行旋转
+angles = [(angle + rotation_angle) % (2 * np.pi) for angle in angles]
+
+# 底部颜色（使用浅灰色和接近白色交替）
+bottom_colors = [off_white, light_gray]
+
+# 创建图形和极坐标轴，定义位置和大小
+# 设置嵌入的图形位置（左下角），扩大 inset 图形的大小
+ax_inset = plt.axes([0.35, 0.12, 0.5, 0.5], polar=True)
+
+# 调整柱状图的宽度，使其更紧密
+bar_width = 0.45  # 更小的宽度，减少柱状图之间的距离
+
+# 绘制底部部分（浅色部分）
+for i, (percentage, angle) in enumerate(zip(percentages, angles)):
+    bottom_color = bottom_colors[i % len(bottom_colors)]  # 按顺序选择底部颜色
+    ax_inset.bar(angle, percentage * 3 / 4, width=bar_width, color=bottom_color, bottom=0)
+
+# 绘制顶部彩色部分（实际显示的柱状图部分）
+for i, (percentage, angle, color) in enumerate(zip(percentages, angles, colors)):
+    ax_inset.bar(angle, percentage / 4, width=bar_width, color=color, bottom=percentage * 3 / 4)
+
+# 在顶部添加百分比标签
+for i, (bar, percentage) in enumerate(zip(ax_inset.patches, percentages)):
+    angle = bar.get_x() + bar.get_width() / 2
+    height = bar.get_height() + 6.5  # 将文本放置在柱状图顶部之外
+    ax_inset.text(angle, height, f'{percentage}%', horizontalalignment='center', verticalalignment='center', size=10, fontweight='bold')
+
+# 移除径向和角度的刻度和标签
+ax_inset.set_yticklabels([])  # 移除径向标签
+ax_inset.set_yticks([])       # 移除径向刻度线
+ax_inset.set_xticks([])       # 移除角度刻度线
+
+# 去掉极坐标图的背景和圆圈
+ax_inset.spines['polar'].set_visible(False)
+plt.savefig("3333.pdf", format='pdf', bbox_inches='tight', dpi=1200)
+plt.tight_layout()
+plt.show()
+import matplotlib.pyplot as plt
+
+# 创建蜂群图
+# 直接使用之前计算好的 Explanation 对象
+shap.plots.beeswarm(shap_values_Explanation, show=False)
+
+# 如果你想保存图像，可以使用 matplotlib 的 savefig 功能
+# 首先获取当前 figure 对象
+fig = plt.gcf()
+
+# 保存图像为 PDF 文件
+fig.savefig("shap_scatter_plot.pdf", dpi=1200, bbox_inches="tight")
+
+# 显示图像
+plt.show()
+

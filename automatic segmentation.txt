@@ -1,0 +1,67 @@
+from onekey_algo.segmentation.run_segmentation import main as seg_main
+from onekey_algo import get_param_in_cwd
+
+my_dir = r'C:\Users\czy\Desktop\jpg'
+
+# 设置参数
+class params:
+    dataset = r'a_binary_image_mask'
+    data_path = my_dir
+    model = get_param_in_cwd('model_name', 'fcn_resnet101')
+    lr = 0.001
+    workers = get_param_in_cwd('workers', 4)
+    batch_size = get_param_in_cwd('batch_size', 4)
+    val_batch_size = 1
+    print_freq = 1
+    epochs = get_param_in_cwd('epochs', 30)
+    optimizer = 'sgd'
+    momentum = 0.9
+    weight_decay = 1e-4
+    save_dir = get_param_in_cwd('save_dir', '.')
+    resume = r''
+    dist_url = 'env://'
+    world_size = 1
+    pretrained = True
+    aux_loss = False
+    test_only = False
+    save_per_epoch = False
+    downsample_ratio = get_param_in_cwd('downsample_ratio', 1)
+    base_size = 240
+    crop_size = 240
+    attr = {}
+
+    def __setattr__(self, key, value):
+        self.attr[key] = value
+
+# 训练模型
+seg_main(params)
+
+
+
+
+###批量预测###
+import glob
+import os
+from onekey_algo.segmentation.eval_segmentation import init, inference
+from onekey_algo import get_param_in_cwd
+
+# 设置保存预测结果的目录
+save_dir = r'C:\Users\czy\Desktop\jpg\UNet'
+
+# 模型权重和可视化目录（通常包含 model.pth 等文件）
+model_root = r'D:\onekey_comp\comp5-自动识别（Which，Where）\UNet\viz'
+
+# 测试图像所在的文件夹路径
+test_data_dir = r'D:\123\jpg\images_exvad'  # 这是你想预测的所有图片所在的文件夹
+
+# 获取该目录下所有的 .png 文件路径，组成一个列表
+test_samples = glob.glob(os.path.join(test_data_dir, '*.png'))
+
+# 如果你不确定是否获取到正确路径，可以打印出来检查：
+print("Found test samples:", test_samples)
+
+# 初始化模型
+model, class_names, device = init(model_root)
+
+# 执行推理
+inference(test_samples, model, device=device, class_names=class_names, save_dir=save_dir)

@@ -1,0 +1,15 @@
+automatic segmentation：onekey (GPU=4060)
+
+feature extraction and selection：onekey
+
+Resnet101：onekey
+
+machine learning and shap：
+python==3.9
+jpblib==1.4.2
+numpy==1.26.4
+pandas==2.2.2
+matplotlib==3.8.0
+scikit-learn==1.5.1
+xgboost==2.0.3
+shap=0.45.1

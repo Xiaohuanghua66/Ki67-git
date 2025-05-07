@@ -1,0 +1,426 @@
+###samplers###
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler, LabelBinarizer
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.over_sampling import RandomOverSampler, SMOTE, BorderlineSMOTE, SVMSMOTE
+
+# 加载数据
+df_train = pd.read_csv('train.csv')
+df_test = pd.read_csv('Test.csv')
+
+# 数据预处理
+X_train = df_train.drop('Ki-67', axis=1)
+y_train = df_train['Ki-67']
+X_test = df_test.drop('Ki-67', axis=1)
+y_test = df_test['Ki-67']
+
+# 确保列一致性
+missing_cols = set(X_train.columns) - set(X_test.columns)
+for col in missing_cols:
+    X_test[col] = 0
+X_test = X_test[X_train.columns]
+
+# 确保所有列都是数值类型
+X_train = X_train.apply(pd.to_numeric, errors='coerce')
+X_test = X_test.apply(pd.to_numeric, errors='coerce')
+
+# 填充缺失值
+X_train = X_train.fillna(0)
+X_test = X_test.fillna(0)
+
+# 定义采样方法
+samplers = [
+    ('None', None),  # 基准（不采样）
+    ('RandomUnder', RandomUnderSampler(random_state=42)),
+    ('RandomOver', RandomOverSampler(random_state=42)),
+    ('SMOTE', SMOTE(random_state=42)),
+    ('BorderSMOTE', BorderlineSMOTE(random_state=42)),
+    ('SVMSMOTE', SVMSMOTE(random_state=42))
+]
+
+# 定义分类模型
+models = [
+    ('LogReg', LogisticRegression(max_iter=1000, random_state=42)),
+    ('SVM', SVC(probability=True, random_state=42)),
+    ('KNN', KNeighborsClassifier()),
+    ('RF', RandomForestClassifier(random_state=42)),
+    ('XGBoost', XGBClassifier(random_state=42)),
+    ('MLP', MLPClassifier(max_iter=1000, random_state=42))
+]
+
+# 初始化结果存储
+results = []
+lb = LabelBinarizer()
+
+# 主循环
+for sampler_name, sampler in samplers:
+    # 应用采样
+    if sampler:
+        X_res, y_res = sampler.fit_resample(X_train, y_train)
+    else:
+        X_res, y_res = X_train.copy(), y_train.copy()
+    
+    # 归一化
+    scaler = MinMaxScaler()
+    X_train_scaled = scaler.fit_transform(X_res)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # 标签编码
+    y_train_oh = lb.fit_transform(y_res)
+    y_test_oh = lb.transform(y_test)
+    
+    # 模型训练与评估
+    for model_name, model in models:
+        try:
+            # 训练
+            model.fit(X_train_scaled, y_res)
+            
+            # 训练集评估
+            train_pred = model.predict(X_train_scaled)
+            train_proba = model.predict_proba(X_train_scaled)
+            train_acc = accuracy_score(y_res, train_pred)
+            train_f1 = f1_score(y_res, train_pred, average='weighted')
+            train_auc = roc_auc_score(y_res, train_proba[:, 1])  # 取正类概率
+            
+            # 测试集评估
+            test_pred = model.predict(X_test_scaled)
+            test_proba = model.predict_proba(X_test_scaled)
+            test_acc = accuracy_score(y_test, test_pred)
+            test_f1 = f1_score(y_test, test_pred, average='weighted')
+            test_auc = roc_auc_score(y_test, test_proba[:, 1])  # 取正类概率
+            
+            # 存储结果
+            results.append({
+                'Sampler': sampler_name,
+                'Model': model_name,
+                'Train_ACC': train_acc,
+                'Train_F1': train_f1,
+                'Train_AUC': train_auc,
+                'Test_ACC': test_acc,
+                'Test_F1': test_f1,
+                'Test_AUC': test_auc
+            })
+        except Exception as e:
+            print(f"Error with {sampler_name}+{model_name}: {str(e)}")
+
+# 结果处理与保存
+results_df = pd.DataFrame(results)
+
+# 按测试AUC排序
+best_results = results_df.sort_values(by=['Test_AUC', 'Test_F1'], ascending=False)
+
+# 打印最佳组合
+print("Top 10 Performances:")
+print(best_results.head(10))
+
+# 保存完整结果
+best_results.to_csv('sampling_comparison_full_results.csv', index=False)
+
+# 按采样方法聚合，包括训练集和测试集的结果
+agg_results = results_df.groupby('Sampler').agg({
+    'Train_AUC': 'mean',
+    'Train_F1': 'mean',
+    'Train_ACC': 'mean',
+    'Test_AUC': 'mean',
+    'Test_F1': 'mean',
+    'Test_ACC': 'mean'
+}).sort_values(by='Test_AUC', ascending=False)
+
+print("\nSampler Performance Summary (with Train Results):")
+print(agg_results)
+agg_results.to_csv('sampling_aggregate_results_with_train.csv')
+
+###贝叶斯优化训练模型#################
+import pandas as pd
+import numpy as np
+from imblearn.over_sampling import SMOTE
+from sklearn.preprocessing import label_binarize
+from sklearn.metrics import (roc_curve, auc, precision_recall_curve, 
+                             average_precision_score, f1_score)
+from sklearn.calibration import calibration_curve
+from skopt import BayesSearchCV
+from skopt.space import Real, Integer, Categorical
+import matplotlib.pyplot as plt
+import joblib
+import json
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import roc_auc_score
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import f1_score
+# 设置全局字体
+plt.rcParams['font.family'] = 'Times New Roman'
+
+# 加载数据
+df_train = pd.read_csv('train.csv')
+df_test = pd.read_csv('Test.csv')
+df_val = pd.read_csv('exvad.csv')
+
+# 数据预处理
+X_train = df_train.drop('Ki-67', axis=1)
+y_train = df_train['Ki-67']
+X_test = df_test.drop('Ki-67', axis=1)
+y_test = df_test['Ki-67']
+X_val = df_val.drop('Ki-67', axis=1)
+y_val = df_val['Ki-67']
+
+# 确保所有列为数值类型，并处理缺失值
+def preprocess_data(X):
+    # 将所有列转换为数值类型，无法转换的值替换为 NaN
+    X = X.apply(pd.to_numeric, errors='coerce')
+    # 填充缺失值为列的均值
+    X = X.fillna(X.mean())
+    return X
+
+# SMOTE过采样
+smote = SMOTE(random_state=42)
+X_train_res, y_train_res = smote.fit_resample(X_train, y_train)
+
+# 定义模型和参数空间
+models = {
+    'LogisticRegression': {
+        'model': LogisticRegression(max_iter=1000),
+        'params': {
+            'C': Real(1e-3, 1e3, prior='log-uniform')
+        }
+    },
+    'SVM': {
+        'model': SVC(probability=True, random_state=42),
+        'params': {
+            'C': Real(1e-3, 1e3, prior='log-uniform'),
+            'gamma': Real(1e-4, 1e1, prior='log-uniform'),
+            'kernel': Categorical(['rbf'])
+        }
+    },
+    'RandomForestClassifier': {
+        'model': RandomForestClassifier(random_state=42),
+        'params': {
+            'n_estimators': Integer(100, 1000),
+            'max_depth': Integer(3, 20),
+            'min_samples_split': Integer(2, 10)
+        }
+    },
+    'XGBClassifier': {
+        'model': XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42),
+        'params': {
+            'learning_rate': Real(0.01, 0.3),
+            'max_depth': Integer(3, 10),
+            'subsample': Real(0.5, 1.0)
+        }
+    },
+    'MLPClassifier': {
+        'model': MLPClassifier(max_iter=1000, random_state=42),
+        'params': {
+            'hidden_layer_sizes': Integer(50, 200),
+            'alpha': Real(1e-5, 1e-1, prior='log-uniform'),
+            'learning_rate_init': Real(0.001, 0.1)
+        }
+    }
+}
+
+# 贝叶斯优化训练模型
+best_models = {}
+best_params = {}
+
+for name, config in models.items():
+    opt = BayesSearchCV(
+        estimator=config['model'],
+        search_spaces=config['params'],
+        scoring='f1',
+        cv=5,
+        n_iter=30,
+        n_jobs=-1,
+        random_state=42
+    )
+    opt.fit(X_train_res, y_train_res)
+    best_models[name] = opt.best_estimator_
+    best_params[name] = opt.best_params_
+    joblib.dump(opt.best_estimator_, f'{name}_best_model.pkl')
+
+# 保存最佳参数
+with open('best_params.json', 'w') as f:
+    json.dump(best_params, f, indent=4)
+
+# 保存最佳参数为 CSV 文件
+best_params_df = pd.DataFrame(best_params).T  # 转置以便每个模型为一行
+best_params_df.to_csv('best_params.csv', index=True)
+
+# 定义颜色
+colors = {
+    'LogisticRegression': '#D15354',
+    'SVM': '#3DA6AE',
+    'RandomForestClassifier': '#8887CB',
+    'XGBClassifier': '#E8886C',
+    'MLPClassifier': '#DBA5DB'
+}
+
+# 定义计算净收益的函数
+def calculate_net_benefit(y_true, y_prob, thresholds):
+    net_benefit = []
+    for threshold in thresholds:
+        y_pred = (y_prob >= threshold).astype(int)
+        tp = np.sum((y_pred == 1) & (y_true == 1))
+        fp = np.sum((y_pred == 1) & (y_true == 0))
+        n = len(y_true)
+        benefit = tp / n - fp / n * (threshold / (1 - threshold))
+        net_benefit.append(benefit)
+    return net_benefit
+
+# 定义绘图函数
+def plot_curves(X, y, dataset_name):
+    # ROC曲线
+    plt.figure(figsize=(10, 8))
+    metrics = {}
+    for name, model in best_models.items():
+        if hasattr(model, 'predict_proba'):
+            y_prob = model.predict_proba(X)[:, 1]
+        else:
+            y_prob = model.decision_function(X)
+            y_prob = 1 / (1 + np.exp(-y_prob))  # 转换为概率
+        
+        # 计算指标
+        fpr, tpr, _ = roc_curve(y, y_prob)
+        auc_value = auc(fpr, tpr)
+        
+        # 计算AUC的95% CI
+        n_bootstraps = 1000
+        rng = np.random.default_rng(42)
+        bootstrapped_scores = []
+        for _ in range(n_bootstraps):
+            indices = rng.choice(len(y), len(y), replace=True)
+            if len(np.unique(y[indices])) < 2:
+                continue
+            score = roc_auc_score(y[indices], y_prob[indices])
+            bootstrapped_scores.append(score)
+        sorted_scores = np.array(bootstrapped_scores)
+        sorted_scores.sort()
+        auc_ci_lower = sorted_scores[int(0.025 * len(sorted_scores))]
+        auc_ci_upper = sorted_scores[int(0.975 * len(sorted_scores))]
+        
+        # 计算其他指标
+        y_pred = (y_prob >= 0.5).astype(int)
+        tn, fp, fn, tp = confusion_matrix(y, y_pred).ravel()
+        acc = (tp + tn) / (tp + tn + fp + fn)
+        sensitivity = tp / (tp + fn) if (tp + fn) else 0
+        specificity = tn / (tn + fp) if (tn + fp) else 0
+        f1 = f1_score(y, y_pred)
+        
+        metrics[name] = {
+            'AUC': f"{auc_value:.2f} ({auc_ci_lower:.2f}, {auc_ci_upper:.2f})",
+            'ACC': f"{acc:.2f}",
+            'F1': f"{f1:.2f}",
+            'Sensitivity': f"{sensitivity:.2f}",
+            'Specificity': f"{specificity:.2f}"
+        }
+        
+        # 绘制ROC曲线
+        plt.plot(fpr, tpr, color=colors[name], linewidth=2, 
+                 label=f"{name} (AUC = {auc_value:.2f})")
+    
+    plt.xlabel('False Positive Rate', fontsize=18)
+    plt.ylabel('True Positive Rate', fontsize=18)
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.legend(loc='lower right', fontsize=12)
+    plt.savefig(f'ROC_{dataset_name}.pdf', dpi=900, bbox_inches='tight')
+    plt.close()
+
+    # PR曲线
+    plt.figure(figsize=(10, 8))
+    for name, model in best_models.items():
+        if hasattr(model, 'predict_proba'):
+            y_prob = model.predict_proba(X)[:, 1]
+        else:
+            y_prob = model.decision_function(X)
+        precision, recall, _ = precision_recall_curve(y, y_prob)
+        avg_precision = average_precision_score(y, y_prob)
+        plt.plot(recall, precision, color=colors[name], linewidth=2,
+                 label=f'{name} (AP = {avg_precision:.2f})')
+    
+    plt.xlabel('Recall', fontsize=18)
+    plt.ylabel('Precision', fontsize=18)
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.legend(loc='upper right', fontsize=12)
+    plt.savefig(f'PR_{dataset_name}.pdf', dpi=900, bbox_inches='tight')
+    plt.close()
+
+    # 校准曲线
+    plt.figure(figsize=(10, 8))
+    for name, model in best_models.items():
+        if hasattr(model, 'predict_proba'):
+            y_prob = model.predict_proba(X)[:, 1]
+        else:
+            y_prob = model.decision_function(X)
+            y_prob = 1 / (1 + np.exp(-y_prob))
+        prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10)
+        plt.plot(prob_pred, prob_true, marker='o', color=colors[name], 
+                 linewidth=2, label=name)
+    
+    plt.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Ideal')
+    plt.xlabel('Predicted Probability', fontsize=18)
+    plt.ylabel('True Probability', fontsize=18)
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.legend(loc='upper left', fontsize=12)
+    plt.savefig(f'Calibration_{dataset_name}.pdf', dpi=900, bbox_inches='tight')
+    plt.close()
+
+    # DCA曲线
+    plt.figure(figsize=(10, 8))
+    thresholds = np.linspace(0.01, 0.99, 100)
+    for name, model in best_models.items():
+        if hasattr(model, 'predict_proba'):
+            y_prob = model.predict_proba(X)[:, 1]
+        else:
+            y_prob = model.decision_function(X)
+            y_prob = 1 / (1 + np.exp(-y_prob))
+        net_benefit = calculate_net_benefit(y, y_prob, thresholds)
+        plt.plot(thresholds, net_benefit, color=colors[name], 
+                 linewidth=2, label=f"{name} (AUC={metrics[name]['AUC'].split(' ')[0]})")
+
+    plt.axhline(y=0, color='gray', linestyle='--', linewidth=1)
+    plt.xlabel('Threshold Probability', fontsize=18)
+    plt.ylabel('Net Benefit', fontsize=18)
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    plt.legend(loc='upper right', fontsize=12)
+    plt.savefig(f'DCA_{dataset_name}.pdf', dpi=900, bbox_inches='tight')
+    plt.close()
+
+    # 保存指标为 JSON 文件
+    with open(f'metrics_{dataset_name}.json', 'w') as f:
+        json.dump(metrics, f, indent=4)
+    
+# 对每个数据集进行预处理
+datasets = {
+    'Train': (preprocess_data(X_train_res), y_train_res),
+    'Test': (preprocess_data(X_test), y_test),
+    'Validation': (preprocess_data(X_val), y_val)
+}
+
+for name, (X, y) in datasets.items():
+    plot_curves(X, y, name)
+    
+import pandas as pd
+all_metrics = {}
+for name, (X, y) in datasets.items():
+    with open(f'metrics_{name}.json', 'r') as f:
+        all_metrics[name] = json.load(f)
+
+for dataset, data in all_metrics.items():
+    df = pd.DataFrame(data).T
+    df.to_csv(f'metrics_{dataset}.csv')  # 直接保存为CSV文件
+
